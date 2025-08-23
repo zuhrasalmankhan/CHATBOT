@@ -36,12 +36,12 @@ vectors = embeddings.embed_documents(
     )
 print ("Embedding done")
 
-# for chunk, vector in zip(chunks, vectors):
-#     doc = {
-#         "text": chunk.page_content,
-#         "embedding": vector  # List of floats
-#     }
-#     collection.insert_one(doc)
+for chunk, vector in zip(chunks, vectors):
+    doc = {
+        "text": chunk.page_content,
+        "embedding": vector  # List of floats
+    }
+    collection.insert_one(doc)
 
-# print("Embeddings stored in MongoDB Atlas.")
+print("Embeddings stored in MongoDB Atlas.")
 
