@@ -1,75 +1,92 @@
-import os
-from typing import Dict, Any
-from dotenv import load_dotenv
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-from langchain_core.tools import tool
-from langchain_together import ChatTogether
-from langgraph.graph import StateGraph, MessagesState, END
-from langgraph.prebuilt import ToolNode, tools_condition
+import unittest
+from unittest.mock import Mock, patch, MagicMock
+import numpy as np
+from langchain.schema import Document
+from RAGfile import RAGTool  # Replace 'your_module' with the actual module name
 
-from Tavilyfile import query_tavily
+class TestRAGTool(unittest.TestCase):
 
-load_dotenv()
+    @patch('RAGfile.MongoClient')
+    @patch('RAGfile.TogetherEmbeddings')
+    def setUp(self, mock_embeddings, mock_mongo):
+        # Mock environment variables
+        with patch.dict('os.environ', {
+            'TOGETHER_API_KEY': 'fake_api_key',
+            'MONGOURI': 'fake_mongouri'
+        }):
+            # Mock MongoDB collection
+            self.mock_collection = Mock()
+            mock_mongo.return_value.__getitem__.return_value.__getitem__.return_value = self.mock_collection
+            
+            # Initialize RAGTool
+            self.rag_tool = RAGTool("dummy_path.pdf")
+            
+            # Mock embeddings
+            self.mock_embeddings = mock_embeddings.return_value
+            self.rag_tool.embeddings = self.mock_embeddings
 
-TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
+    @patch('RAGfile.PDFPlumberLoader')
+    @patch('RAGfile.RecursiveCharacterTextSplitter')
+    def test_store_embeddings_when_collection_empty(self, mock_splitter, mock_loader):
+        # Mock empty collection
+        self.mock_collection.count_documents.return_value = 0
+        
+        # Mock PDF loader
+        mock_docs = [Document(page_content="Sample text")]
+        mock_loader_instance = Mock()
+        mock_loader_instance.load.return_value = mock_docs
+        mock_loader.return_value = mock_loader_instance
+        
+        # Mock text splitter
+        mock_chunks = [Document(page_content="Sample chunk")]
+        mock_splitter_instance = Mock()
+        mock_splitter_instance.split_documents.return_value = mock_chunks
+        mock_splitter.return_value = mock_splitter_instance
+        
+        # Mock embeddings generation
+        self.mock_embeddings.embed_documents.return_value = [[0.1, 0.2, 0.3]]
+        
+        # Call the method
+        self.rag_tool.store_embeddings_once()
+        
+        # Assertions
+        self.mock_collection.insert_one.assert_called_once_with({
+            "text": "Sample chunk",
+            "embedding": [0.1, 0.2, 0.3]
+        })
 
-@tool
-def tavily_search(query: str) -> str:
-    """Search the internet for latest information."""
-    return query_tavily(query)
+    def test_store_embeddings_when_collection_not_empty(self):
+        # Mock non-empty collection
+        self.mock_collection.count_documents.return_value = 1
+        
+        # Call the method
+        self.rag_tool.store_embeddings_once()
+        
+        # Assertions
+        self.mock_collection.insert_one.assert_not_called()
 
-@tool
-def rag_lookup(query: str) -> str:
-    """Search company documents and PDFs."""
-    return "NONE"
+    def test_retrieve_documents(self):
+        # Mock query embedding
+        self.mock_embeddings.embed_query.return_value = [0.1, 0.2, 0.3]
+        
+        # Mock stored documents with embeddings
+        mock_docs = [
+            {"text": "Doc 1", "embedding": [0.4, 0.5, 0.6]},
+            {"text": "Doc 2", "embedding": [0.1, 0.2, 0.3]}  # Exact match for query
+        ]
+        self.mock_collection.find.return_value = mock_docs
+        
+        # Call retrieve method
+        results = self.rag_tool.retrieve("test query", top_k=1)
+        
+        # Assertions
+        self.assertEqual(results, ["Doc 2"])  # Most similar document
+        self.mock_embeddings.embed_query.assert_called_once_with("test query")
 
-tools = [tavily_search, rag_lookup]
+    def test_retrieve_with_empty_collection(self):
+        self.mock_collection.find.return_value = []
+        results = self.rag_tool.retrieve("test query")
+        self.assertEqual(results, [])
 
-llm_with_tools = ChatTogether(
-    model="meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
-    together_api_key=TOGETHER_API_KEY,
-).bind_tools(tools)
-
-system_prompt = """You are an intelligent assistant. Decide how to answer:
-- If the user asks for latest/current info or news, call `tavily_search`.
-- If the user asks about the company documents/PDFs, call `rag_lookup`.
-- Otherwise, answer directly.
-Always give clear, concise answers.
-"""
-
-graph = StateGraph(MessagesState)
-
-def chatbot_node(state: MessagesState) -> Dict[str, Any]:
-    msgs = [SystemMessage(content=system_prompt)] + state["messages"]
-    msg = llm_with_tools.invoke(msgs)
-    return {"messages": [msg]}
-
-graph.add_node("chatbot", chatbot_node)
-graph.add_node("tools", ToolNode(tools))
-graph.set_entry_point("chatbot")
-graph.add_conditional_edges("chatbot", tools_condition)
-graph.add_edge("tools", "chatbot")
-graph.add_edge("chatbot", END)
-
-compiled_graph = graph.compile()
-
-if __name__ == "__main__":
-    config = {"configurable": {"thread_id": "1"}}
-    state = {"messages": []}
-
-    while True:
-        user_input = input("\nYou: ")
-        if user_input.lower() in ["exit", "quit"]:
-            print("Goodbye!")
-            break
-
-        # Add user message
-        state["messages"].append(HumanMessage(content=user_input))
-
-        # Invoke the graph
-        state = compiled_graph.invoke(state, config=config)
-
-        # Print AI responses
-        for msg in state["messages"]:
-            if isinstance(msg, AIMessage):
-                print(f"AI: {msg.content}")
+if __name__ == '__main__':
+    unittest.main()
