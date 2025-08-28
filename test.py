@@ -2,7 +2,8 @@ from pymongo import MongoClient
 from getpass import getpass
 
 
-client = MongoClient("mongodb://localhost:27017")
+MONGO_URI = "mongodb+srv://<username>:<password>@<cluster>.mongodb.net/?retryWrites=true&w=majority"
+client = MongoClient(MONGO_URI)
 db = client["chatbot"]
 users_col = db["users"]
 chats_col = db["chats"]
