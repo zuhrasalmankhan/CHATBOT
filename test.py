@@ -1,92 +1,76 @@
-import unittest
-from unittest.mock import Mock, patch, MagicMock
-import numpy as np
-from langchain.schema import Document
-from RAGfile import RAGTool  # Replace 'your_module' with the actual module name
+from pymongo import MongoClient
+from getpass import getpass
 
-class TestRAGTool(unittest.TestCase):
+# ---- Mongo Setup ----
+client = MongoClient("mongodb://localhost:27017")
+db = client["chatbot"]
+users_col = db["users"]
+chats_col = db["chats"]
 
-    @patch('RAGfile.MongoClient')
-    @patch('RAGfile.TogetherEmbeddings')
-    def setUp(self, mock_embeddings, mock_mongo):
-        # Mock environment variables
-        with patch.dict('os.environ', {
-            'TOGETHER_API_KEY': 'fake_api_key',
-            'MONGOURI': 'fake_mongouri'
-        }):
-            # Mock MongoDB collection
-            self.mock_collection = Mock()
-            mock_mongo.return_value.__getitem__.return_value.__getitem__.return_value = self.mock_collection
-            
-            # Initialize RAGTool
-            self.rag_tool = RAGTool("dummy_path.pdf")
-            
-            # Mock embeddings
-            self.mock_embeddings = mock_embeddings.return_value
-            self.rag_tool.embeddings = self.mock_embeddings
+# ---- Hardcoded users (insert once) ----
+def seed_users():
+    if users_col.count_documents({}) == 0:
+        users_col.insert_many([
+            {"username": "amna", "password": "1123"},
+            {"username": "zahra", "password": "abcd"}
+        ])
+        print("Users inserted!")
 
-    @patch('RAGfile.PDFPlumberLoader')
-    @patch('RAGfile.RecursiveCharacterTextSplitter')
-    def test_store_embeddings_when_collection_empty(self, mock_splitter, mock_loader):
-        # Mock empty collection
-        self.mock_collection.count_documents.return_value = 0
-        
-        # Mock PDF loader
-        mock_docs = [Document(page_content="Sample text")]
-        mock_loader_instance = Mock()
-        mock_loader_instance.load.return_value = mock_docs
-        mock_loader.return_value = mock_loader_instance
-        
-        # Mock text splitter
-        mock_chunks = [Document(page_content="Sample chunk")]
-        mock_splitter_instance = Mock()
-        mock_splitter_instance.split_documents.return_value = mock_chunks
-        mock_splitter.return_value = mock_splitter_instance
-        
-        # Mock embeddings generation
-        self.mock_embeddings.embed_documents.return_value = [[0.1, 0.2, 0.3]]
-        
-        # Call the method
-        self.rag_tool.store_embeddings_once()
-        
-        # Assertions
-        self.mock_collection.insert_one.assert_called_once_with({
-            "text": "Sample chunk",
-            "embedding": [0.1, 0.2, 0.3]
-        })
+# ---- Login function ----
+def login():
+    username = input("Enter username: ")
+    password = getpass("Enter password: ")
 
-    def test_store_embeddings_when_collection_not_empty(self):
-        # Mock non-empty collection
-        self.mock_collection.count_documents.return_value = 1
-        
-        # Call the method
-        self.rag_tool.store_embeddings_once()
-        
-        # Assertions
-        self.mock_collection.insert_one.assert_not_called()
+    user = users_col.find_one({"username": username, "password": password})
+    if user:
+        print(f"✅ Welcome {username}")
+        return username
+    else:
+        print("❌ Invalid credentials")
+        return None
 
-    def test_retrieve_documents(self):
-        # Mock query embedding
-        self.mock_embeddings.embed_query.return_value = [0.1, 0.2, 0.3]
-        
-        # Mock stored documents with embeddings
-        mock_docs = [
-            {"text": "Doc 1", "embedding": [0.4, 0.5, 0.6]},
-            {"text": "Doc 2", "embedding": [0.1, 0.2, 0.3]}  # Exact match for query
-        ]
-        self.mock_collection.find.return_value = mock_docs
-        
-        # Call retrieve method
-        results = self.rag_tool.retrieve("test query", top_k=1)
-        
-        # Assertions
-        self.assertEqual(results, ["Doc 2"])  # Most similar document
-        self.mock_embeddings.embed_query.assert_called_once_with("test query")
+# ---- Save chat ----
+def save_message(username, role, content):
+    chats_col.insert_one({
+        "username": username,
+        "role": role,          # "user" or "assistant"
+        "content": content
+    })
 
-    def test_retrieve_with_empty_collection(self):
-        self.mock_collection.find.return_value = []
-        results = self.rag_tool.retrieve("test query")
-        self.assertEqual(results, [])
+# ---- Get chat history ----
+def get_history(username):
+    messages = list(chats_col.find({"username": username}))
+    return messages
 
-if __name__ == '__main__':
-    unittest.main()
+# ---- Demo loop ----
+if __name__ == "__main__":
+    seed_users()
+    user = None
+    while not user:
+        user = login()
+
+    while True:
+        query = input(f"\n{user}: ")
+        if query.lower() in ["exit", "quit"]:
+            break
+
+        # Save user message
+        save_message(user, "user", query)
+
+        # Fake response (replace with your chatbot later)
+        if "lahore" in query.lower():
+            response = "You live in Pakistan."
+        elif "where do i live" in query.lower():
+            history = get_history(user)
+            found = None
+            for msg in history:
+                if "lahore" in msg["content"].lower():
+                    found = "You mentioned you live in Lahore, Pakistan."
+                    break
+            response = found if found else "I don’t know, you never told me."
+        else:
+            response = "Hmm, tell me more."
+
+        # Save assistant message
+        save_message(user, "assistant", response)
+        print(f"AI: {response}")
