@@ -1,0 +1,8 @@
+langchain
+langchain-core
+langchain-community
+langgraph
+google-generativeai
+pymongo
+python-dotenv
+gradio
