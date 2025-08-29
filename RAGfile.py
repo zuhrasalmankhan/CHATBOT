@@ -17,14 +17,13 @@ class RAGTool:
         self.client = MongoClient(MONGOURI)
         self.db = self.client[db_name]
         self.collection = self.db[collection_name]
-        # ✅ Local free embeddings
         self.embeddings = SentenceTransformer("all-mpnet-base-v2")
 
     
     def store_embeddings_once(self, chunk_size=1000, chunk_overlap=200):
         """Embed the PDF and store in Mongo only if not already stored."""
         if self.collection.count_documents({}) > 0:
-            print("✅ Embeddings already exist in MongoDB. Skipping embedding.")
+            print("Embeddings already exist in MongoDB. Skipping embedding.")
             return
 
         loader = PDFPlumberLoader(self.pdf_path)
@@ -46,7 +45,7 @@ class RAGTool:
             }
             self.collection.insert_one(doc)
 
-        print(f"✅ Stored {len(chunks)} embeddings in MongoDB.")
+        print(f" Stored {len(chunks)} embeddings in MongoDB.")
 
     def retrieve(self, query: str, top_k: int = 3):
         """Retrieve most relevant text chunks for a query."""
@@ -56,7 +55,7 @@ class RAGTool:
         # Fetch stored embeddings
         docs = list(self.collection.find({}, {"text": 1, "embedding": 1, "_id": 0}))
         if not docs:
-            print("⚠️ No documents found in MongoDB. Did you run store_embeddings_once()?")
+            print("No documents found in MongoDB. Did you run store_embeddings_once()?")
             return []
 
         results = []
@@ -72,13 +71,13 @@ class RAGTool:
 
         return [{"text": text, "score": float(score)} for score, text in results[:top_k]]
 def main():
-    pdf_path = "Netsol_report.pdf"   # ✅ Update this if your PDF is named differently
+    pdf_path = "netsol_report.pdf"   
     rag = RAGTool(pdf_path)
 
     # Store embeddings once
     rag.store_embeddings_once()
 
-    print("\n📌 Ask questions about the PDF (type 'exit' to quit)\n")
+    print("\n Ask questions about the PDF (type 'exit' to quit)\n")
     while True:
         query = input("You: ")
         if query.lower() in ["exit", "quit"]:
@@ -87,7 +86,7 @@ def main():
 
         answers = rag.retrieve(query)
         if not answers:
-            print("⚠️ No results found.")
+            print("No results found.")
         else:
             print("\nTop results:")
             for ans in answers:
