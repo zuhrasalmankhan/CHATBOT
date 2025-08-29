@@ -1,59 +1,53 @@
+import os
+from RAGfile import RAGTool
 from pymongo import MongoClient
-from getpass import getpass
+from dotenv import load_dotenv
 
+# Load .env file
+load_dotenv()
 
-MONGO_URI = "mongodb+srv://<username>:<password>@<cluster>.mongodb.net/?retryWrites=true&w=majority"
-client = MongoClient(MONGO_URI)
-db = client["chatbot"]
-users_col = db["users"]
-chats_col = db["chats"]
+def test_mongo_connection():
+    """Test MongoDB Atlas connection before doing anything else."""
+    try:
+        MONGO_URI = os.getenv("MONGO_URI")
+        if not MONGO_URI:
+            raise ValueError("MONGO_URI not found in environment variables.")
 
-def seed_users():
-    if users_col.count_documents({}) == 0:
-        users_col.insert_many([
-            {"username": "amna", "password": "1123"},
-            {"username": "zahra", "password": "abcd"}
-        ])
-        print("Users inserted!")
+        # Connect to Atlas cluster
+        client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+        # Force a server selection to verify connection
+        dbs = client.list_database_names()
+        print("✅ MongoDB Atlas connected successfully!")
+        print("Databases available:", dbs)
+        return True
+    except Exception as e:
+        print("❌ MongoDB Atlas connection failed:", str(e))
+        return False
 
-def login():
-    username = input("Enter username: ")
-    password = getpass("Enter password: ")
+def main():
+    # Test MongoDB Atlas connection before proceeding
+    if not test_mongo_connection():
+        print("Exiting program due to MongoDB connection error.")
+        return
 
-    user = users_col.find_one({"username": username, "password": password})
-    if user:
-        print(f" Welcome {username}")
-        return username
+    # Path to your PDF
+    pdf_path = "Netsol_report.pdf"
+    
+    # Initialize RAG tool with Atlas connection
+    MONGO_URI = os.getenv("MONGO_URI")
+    rag_tool = RAGTool(pdf_path=pdf_path)
+
+    # Example query
+    query = "What does the report say about AI regulations?"
+    results = rag_tool.retrieve(query)
+
+    if results:
+        print("\nTop results:")
+        for r in results:
+            print(f"Score: {r['score']:.4f}")
+            print(f"Text: {r['text'][:300]}...\n")
     else:
-        print(" Invalid credentials")
-        return None
-
-# ---- Save chat ----
-def save_message(username, role, content):
-    chats_col.insert_one({
-        "username": username,
-        "role": role,          # "user" or "assistant"
-        "content": content
-    })
-
-def get_history(username):
-    messages = list(chats_col.find({"username": username}))
-    return messages
+        print("No results found.")
 
 if __name__ == "__main__":
-    seed_users()
-    user = None
-    while not user:
-        user = login()
-
-    while True:
-        query = input(f"\n{user}: ")
-        if query.lower() in ["exit", "quit"]:
-            break
-
-        save_message(user, "user", query)
-        # inserting llm reposnse
-
-        # Save assistant message
-        save_message(user, "assistant", response)
-        print(f"AI: {response}")
+    main()
