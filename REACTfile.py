@@ -3,40 +3,66 @@ from typing import Dict, Any
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_core.tools import tool
-from langchain_together import ChatTogether
 from langgraph.graph import StateGraph, MessagesState, END
 from langgraph.prebuilt import ToolNode, tools_condition
+from RAGfile import RAGTool
+
+# Gemini wrapper
+from langchain_google_genai import ChatGoogleGenerativeAI  
 
 from Tavilyfile import query_tavily
 
 load_dotenv()
 
-TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
-
+GEMINI_API_KEY = os.getenv("Gemini_API")
+rag_tool = RAGTool("netsol_report.pdf")  
+# -------------------- Tools -------------------- #
 @tool
 def tavily_search(query: str) -> str:
-    """Search the internet for latest information."""
-    return query_tavily(query)
+    """Search for the latest information using Tavily API and return a brief summary."""
+    result = query_tavily(query)
+    return f"Latest info: {result[:300]}..."
 
 @tool
 def rag_lookup(query: str) -> str:
-    """Search company documents and PDFs."""
-    return "NONE"
+    """Retrieve relevant information from company PDFs."""
+    results = rag_tool.retrieve(query)
+    if not results:
+        return "No relevant content found."
+    return "Top match: " + results[0]["text"][:300]
+
 
 tools = [tavily_search, rag_lookup]
 
-llm_with_tools = ChatTogether(
-    model="meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
-    together_api_key=TOGETHER_API_KEY,
+# -------------------- LLM with Tools -------------------- #
+llm_with_tools = ChatGoogleGenerativeAI(
+    model="gemini-1.5-flash",  # lighter model, higher quota
+    google_api_key=GEMINI_API_KEY,
 ).bind_tools(tools)
 
-system_prompt = """You are an intelligent assistant. Decide how to answer:
-- If the user asks for latest/current info or news, call `tavily_search`.
-- If the user asks about the company documents/PDFs, call `rag_lookup`.
-- Otherwise, answer directly.
-Always give clear, concise answers.
+
+# -------------------- System Prompt -------------------- #
+system_prompt = """
+You are a helpful and concise AI assistant.
+
+Decision rules for tool use:
+- If the user asks for the latest/current information or news, call `tavily_search`.
+- If the user asks about the contents of Netsol_report.pdf, call `rag_lookup`.
+- If `rag_lookup` returns no relevant information, answer directly based on your knowledge.
+- Otherwise, answer directly without using a tool.
+
+Response guidelines:
+- Always answer clearly and directly.
+- Summarize tool results in 2–3 sentences.
+- Do not repeat the question unless necessary.
+- If you don’t know something, say so briefly.
+- When the user shares personal info (like their name), acknowledge it naturally (e.g., "Nice to meet you, Zee!").
 """
 
+
+
+
+# -------------------- Graph Setup -------------------- #
 graph = StateGraph(MessagesState)
 
 def chatbot_node(state: MessagesState) -> Dict[str, Any]:
@@ -53,6 +79,7 @@ graph.add_edge("chatbot", END)
 
 compiled_graph = graph.compile()
 
+# -------------------- CLI Loop -------------------- #
 if __name__ == "__main__":
     config = {"configurable": {"thread_id": "1"}}
     state = {"messages": []}
@@ -63,13 +90,13 @@ if __name__ == "__main__":
             print("Goodbye!")
             break
 
-        # Add user message
         state["messages"].append(HumanMessage(content=user_input))
-
-        # Invoke the graph
         state = compiled_graph.invoke(state, config=config)
 
-        # Print AI responses
+        # Only print unique AI messages
+        seen = set()
         for msg in state["messages"]:
             if isinstance(msg, AIMessage):
-                print(f"AI: {msg.content}")
+                if msg.content.strip() and msg.content not in seen:
+                    print(f"AI: {msg.content.strip()}")
+                    seen.add(msg.content)
